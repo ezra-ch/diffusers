@@ -311,6 +311,8 @@ class FeedForward(nn.Module):
             act_fn = GEGLU(dim, inner_dim)
         elif activation_fn == "geglu-approximate":
             act_fn = ApproximateGELU(dim, inner_dim)
+        elif activation_fn == "swiglu":
+            act_fn = SwiGLU(dim, inner_dim)
 
         self.net = nn.ModuleList([])
         # project in
@@ -404,7 +406,29 @@ class ApproximateGELU(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.proj(x)
         return x * torch.sigmoid(1.702 * x)
+    
+class SwiGLU(nn.Module):
+    r"""
+    A variant of the Swish-Gated Linear Unit (SwiGLU) activation function.
 
+    Parameters:
+        dim_in (int): The number of input channels.
+        dim_out (int): The number of output channels.
+    """
+
+    def __init__(self, dim_in: int, dim_out: int):
+        super().__init__()
+        self.proj = nn.Linear(dim_in, dim_out * 2)
+
+    def silu(self, gate):
+        if gate.device.type != "mps":
+            return F.silu(gate)
+        # mps: silu is not implemented for float16
+        return F.silu(gate.to(dtype=torch.float32)).to(dtype=gate.dtype)
+
+    def forward(self, hidden_states):
+        hidden_states, gate = self.proj(hidden_states).chunk(2, dim=-1)
+        return hidden_states * self.silu(gate)
 
 class AdaLayerNorm(nn.Module):
     r"""
